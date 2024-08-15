@@ -10,23 +10,23 @@
 
 // Function for the peers to receive messages from each other
 // Void pointer is used as argument and return to be able to use function in pthread_create
+// arg should be the socket file descriptor of the socket we should receive messages FROM
 void* receive_messages(void* arg) {
-    printf("Running receive messages!");
-
     // Cast the argument to an integer socket file descriptor
     // Dereference to get the value from the integer pointer
     int sockfd = *((int*)arg);
     char buffer[BUFFER_SIZE]; // Buffer to store received messages
     int bytes_received; // Number of bytes received from recv function
 
-    printf("sockfd in receive_messages function: %d", sockfd);
-
     // Continually receive bytes from the peer until there is an error or the p2p connection is interrupted
+    // sockfd is a socket file descriptor that specifies the socket from which to receive data
+    // buffer is where the received data will be stored
+    // BUFFER_SIZE is the maximum number of bytes to be received
+    // The last argument specifies options for the receive operation, 0 indicating default behaviour
     while ((bytes_received = recv(sockfd, buffer, BUFFER_SIZE, 0)) > 0) {
-        printf("Number of bytes received: %d", bytes_received);
         // Null-terminate the received data since recv does not null terminate the buffer by default and C expects null terminated strings
         buffer[bytes_received] = '\0'; 
-        printf("Peer: %s\n", buffer); // Print received bytes as a string to the standard output
+        printf("Peer: %s", buffer); // Print received bytes as a string to the standard output
     }
 
     // If no more bytes are received, causing the while loop to stop, print that the peer has disconnected
@@ -34,7 +34,7 @@ void* receive_messages(void* arg) {
         printf("Peer disconnected\n");
     } else if (bytes_received < 0) {
         // If bytes received are less than 0, this indicates an error in the recv function
-        perror("Receive failed");
+        perror("Receive failed\n");
     }
 
     // No data needs to be returned in the thread function, which expects void*, so just return NULL
@@ -42,6 +42,7 @@ void* receive_messages(void* arg) {
 }
 
 // Function for the peers to send messages to each other
+// sockfd should be the socket file descriptor of the socket we're sending TO
 void send_messages(int sockfd) {
     // Buffer to store outgoing message
     char buffer[BUFFER_SIZE]; 
@@ -62,10 +63,10 @@ void send_messages(int sockfd) {
     }
 }
 
-
 // Specify the argument count (argc) and the argument vector (argv)
 // to be able to specify if the application should act as a server or a client
 int main(int argc, char* argv[]) {
+    // Print error message if user gives invalid number of arguments
     if (argc != 2) {
         printf("Invalid number of arguments!\n");
         return 1;
@@ -138,7 +139,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Inform the user that a peer is connected
-        printf("Connected to peer (client) with sockfd: %d, as server.\n", client_fd);
+        printf("Connected to peer as server.\n");
 
         // Create a POSIX-thread to handle receiving messages
         // The first argument is a pointer to a variable of type phtread_t, which stores the id of the newly created thread
@@ -149,12 +150,12 @@ int main(int argc, char* argv[]) {
         // The fourth argument is the argument that will be passed as an argument to the start routine (the function executed in the thread)
         // The argument is sent in as a void pointer, therefore we will provide the address of the sockfd variable which is the socket file descriptor for our server socket
         // We want our server to receive messages, and therefore its socket file descriptor is passed into the thread function
-        pthread_create(&recv_thread_server, NULL, receive_messages, &sockfd);
+        pthread_create(&recv_thread_server, NULL, receive_messages, &client_fd);
 
         // Handle message sending
         // The socket file descriptor of the server socket is passed in to the send messages function
         // This is because the send_messages function takes in the socket file descriptor of the sender of a message
-        send_messages(sockfd);
+        send_messages(client_fd);
     } else if (strcmp(argv[1], "client") == 0) {
         printf("Enter server IP address: "); // Prompt the user to enter the server IP address
         // Buffer to store the IP address in its human readable form
@@ -180,7 +181,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Inform user of successful connection
-        printf("Connection successful!\nConnected to peer as client, client sockfd: %d", sockfd);
+        printf("Connection successful!\nConnected to peer as client.\n");
 
         // Create a thread to handle receiving messages, similar to the server socket
         // Use a different identifier to have a handle to the clients receive thread as well
