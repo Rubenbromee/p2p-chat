@@ -2,22 +2,28 @@
 #include <unistd.h> // POSIX API for Unix standard functions
 #include <arpa/inet.h> // Definitions for internet operations
 #include <pthread.h> // POSIX thread library for multi-threading
+#include <string.h> // String handling functions, like strcmp
 #include <stdlib.h>  // Standard library functions
 
 #define BUFFER_SIZE 4096 // Set the buffer size to the maximum message size
 #define PORT 8080 // Define the port number for the server/client
 
-// Function for the peers to recieve messages from eachother
+// Function for the peers to receive messages from each other
 // Void pointer is used as argument and return to be able to use function in pthread_create
 void* receive_messages(void* arg) {
+    printf("Running receive messages!");
+
     // Cast the argument to an integer socket file descriptor
     // Dereference to get the value from the integer pointer
     int sockfd = *((int*)arg);
-    char buffer[BUFFER_SIZE]; // Buffer to store recieved messages
-    int bytes_received; // Number of bytes recieved from recv function
+    char buffer[BUFFER_SIZE]; // Buffer to store received messages
+    int bytes_received; // Number of bytes received from recv function
 
-    // Continually recieve bytes from the peer until there is an error or the p2p connection is interrupted
+    printf("sockfd in receive_messages function: %d", sockfd);
+
+    // Continually receive bytes from the peer until there is an error or the p2p connection is interrupted
     while ((bytes_received = recv(sockfd, buffer, BUFFER_SIZE, 0)) > 0) {
+        printf("Number of bytes received: %d", bytes_received);
         // Null-terminate the received data since recv does not null terminate the buffer by default and C expects null terminated strings
         buffer[bytes_received] = '\0'; 
         printf("Peer: %s\n", buffer); // Print received bytes as a string to the standard output
@@ -27,16 +33,15 @@ void* receive_messages(void* arg) {
     if (bytes_received == 0) {
         printf("Peer disconnected\n");
     } else if (bytes_received < 0) {
-        // If bytes recieved are less than 0, this indicates an error in the recv function
-        // Specify error?
+        // If bytes received are less than 0, this indicates an error in the recv function
         perror("Receive failed");
     }
 
-    // No data needs to be returned in the thread function, which expects void*, so just return NULLs
+    // No data needs to be returned in the thread function, which expects void*, so just return NULL
     return NULL;
 }
 
-// Function for the peers to send messages to eachother
+// Function for the peers to send messages to each other
 void send_messages(int sockfd) {
     // Buffer to store outgoing message
     char buffer[BUFFER_SIZE]; 
@@ -68,7 +73,7 @@ int main(int argc, char* argv[]) {
 
     int sockfd, client_fd; // Socket file descriptors
     struct sockaddr_in address; // Structure to hold socket address information
-    pthread_t recv_thread; // Receive thread for concurrently receiving and sending capabilities
+    pthread_t recv_thread_server, recv_thread_client; // Receive thread identifiers for concurrently receiving and sending capabilities
     socklen_t addr_len = sizeof(address); // Length of the address structure
 
     // Create a TCP (AF_INET), stream socket (SOCK_STREAM), with the default protocol (0 = TCP for stream sockets)
@@ -86,7 +91,7 @@ int main(int argc, char* argv[]) {
     address.sin_port = htons(PORT);
 
     // Parse the second argument in the argument vector (program is first argument)
-    // Compare it to "server" to verify that this version of the applcation should run as a server
+    // Compare it to "server" to verify that this version of the application should run as a server
     // strcmp compares each character in the strings and returns the difference in ASCII-value
     // between the first non-equal character in the compared strings, otherwise it returns 0
     // if the strings are the same
@@ -133,7 +138,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Inform the user that a peer is connected
-        printf("Connected to peer as server.\n");
+        printf("Connected to peer (client) with sockfd: %d, as server.\n", client_fd);
 
         // Create a POSIX-thread to handle receiving messages
         // The first argument is a pointer to a variable of type phtread_t, which stores the id of the newly created thread
@@ -144,18 +149,52 @@ int main(int argc, char* argv[]) {
         // The fourth argument is the argument that will be passed as an argument to the start routine (the function executed in the thread)
         // The argument is sent in as a void pointer, therefore we will provide the address of the sockfd variable which is the socket file descriptor for our server socket
         // We want our server to receive messages, and therefore its socket file descriptor is passed into the thread function
-        pthread_create(&recv_thread, NULL, receive_messages, &sockfd);
+        pthread_create(&recv_thread_server, NULL, receive_messages, &sockfd);
 
         // Handle message sending
         // The socket file descriptor of the server socket is passed in to the send messages function
         // This is because the send_messages function takes in the socket file descriptor of the sender of a message
         send_messages(sockfd);
-    } else if (strcmp(argv[1], "client" == 0)) {
-        printf("Enter server IP address: ");
+    } else if (strcmp(argv[1], "client") == 0) {
+        printf("Enter server IP address: "); // Prompt the user to enter the server IP address
         // Buffer to store the IP address in its human readable form
         // INET_ADDRSTRLEN is the length of a human readable IPV4 address, i.e "192.168.1.1"
-        char ip[INET_ADDRSTRLEN]; 
+        char ip[INET_ADDRSTRLEN];
+        // Read a sequence of characters from the standard output until a whitespace character is encountered (space, tab, newline, etc.)
+        scanf("%s", ip);
+        // After scanf, the newline character is left in the input buffer, call getchar to clear the input buffer of the newline character
+        getchar();
+        // Convert the ip address given to binary format and store it in the address structure
+        address.sin_addr.s_addr = inet_addr(ip);
+
+        // Connect the client socket, specified by the socket file descriptor, to the server socket
+        // The ip address of the server socket is stored in the address structure
+        // Port and address family is set before the if-statement
+        // The server socket accepts any ip address, defined by INADDR_ANY
+        // Size of the current address is passed in to define how the address structure should be read
+        if (connect(sockfd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+            // If return value from connect is negative, connecting to the server socket has failed
+            perror("Connection to server socket failed!"); // Print an error message if connection failed
+            close(sockfd); // Close the socket
+            exit(EXIT_FAILURE); // Exit the program with an error code
+        }
+
+        // Inform user of successful connection
+        printf("Connection successful!\nConnected to peer as client, client sockfd: %d", sockfd);
+
+        // Create a thread to handle receiving messages, similar to the server socket
+        // Use a different identifier to have a handle to the clients receive thread as well
+        pthread_create(&recv_thread_client, NULL, receive_messages, &sockfd);
+
+        // Handle sending messages for the client socket
+        send_messages(sockfd); 
+    } else {
+        // Print error message if invalid arguments are used
+        printf("Invalid argument. Use 'server' or 'client'.\n");
+        close(sockfd); // Close the socket
+        return 1; // Exit the program with a non-zero status, indicating faulty program termination
     }
 
-    return 0;
+    close(sockfd); // Close the main socket when done
+    return 0; // Return 0 to indicate successful program termination
 }
